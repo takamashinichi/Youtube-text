@@ -1,12 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from 'openai';
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import Anthropic from '@anthropic-ai/sdk';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
+
+const anthropic = new Anthropic({
+  apiKey: process.env.CLAUDE_API_KEY || '',
+});
 
 // 利用可能なAIモデル
 const ALLOWED_MODELS = [
@@ -84,8 +89,25 @@ export async function POST(req: NextRequest) {
       const geminiResponse = await result.response;
       response = geminiResponse.text();
     } else if (model.startsWith('claude-3')) {
-      // Claude APIを使用（実装予定）
-      throw new Error("Claude APIは現在実装中です。");
+      // Claude APIを使用
+      const message = await anthropic.messages.create({
+        model: model === 'claude-3-opus' ? 'claude-3-opus-20240229' : 'claude-3-sonnet-20240229',
+        max_tokens: 1000,
+        temperature: 0.7,
+        system: systemPrompt,
+        messages: [
+          {
+            role: 'user',
+            content: text,
+          },
+        ],
+      });
+      const content = message.content[0];
+      if ('value' in content && typeof content.value === 'string') {
+        response = content.value;
+      } else {
+        throw new Error("予期しない応答形式です。");
+      }
     } else {
       // OpenAI APIを使用
       const completion = await openai.chat.completions.create({
