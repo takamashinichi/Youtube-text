@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from 'openai';
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
+
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 
 // 利用可能なAIモデル
 const ALLOWED_MODELS = [
@@ -69,23 +72,40 @@ export async function POST(req: NextRequest) {
 - 自己評価は不要
 - チャンネル登録、高評価、コメントを必ず促す`;
 
-    const completion = await openai.chat.completions.create({
-      model,
-      messages: [
-        {
-          role: "system",
-          content: systemPrompt
-        },
-        {
-          role: "user",
-          content: text
-        }
-      ],
-      max_tokens: 500,
-      temperature: 0.7,
-    });
+    let response = '';
 
-    const response = completion.choices[0].message.content?.trim() || '';
+    if (model === 'gemini-pro') {
+      // Gemini APIを使用
+      const geminiModel = genAI.getGenerativeModel({ model: "gemini-pro" });
+      const result = await geminiModel.generateContent([
+        systemPrompt,
+        text
+      ]);
+      const geminiResponse = await result.response;
+      response = geminiResponse.text();
+    } else if (model.startsWith('claude-3')) {
+      // Claude APIを使用（実装予定）
+      throw new Error("Claude APIは現在実装中です。");
+    } else {
+      // OpenAI APIを使用
+      const completion = await openai.chat.completions.create({
+        model,
+        messages: [
+          {
+            role: "system",
+            content: systemPrompt
+          },
+          {
+            role: "user",
+            content: text
+          }
+        ],
+        max_tokens: 500,
+        temperature: 0.7,
+      });
+
+      response = completion.choices[0].message.content?.trim() || '';
+    }
     
     // 要約本文とハッシュタグを分離
     const [summaryText, hashtagText = ''] = response.split('---').map(text => text.trim());
