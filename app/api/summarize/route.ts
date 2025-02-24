@@ -6,7 +6,14 @@ const openai = new OpenAI({
 });
 
 // 利用可能なAIモデル
-const ALLOWED_MODELS = ['gpt-3.5-turbo', 'gpt-4', 'gpt-4-turbo'];
+const ALLOWED_MODELS = [
+  'gpt-3.5-turbo', 
+  'gpt-4', 
+  'gpt-4-turbo',
+  'gemini-pro',
+  'claude-3-opus',
+  'claude-3-sonnet'
+];
 
 export async function POST(req: NextRequest) {
   try {
