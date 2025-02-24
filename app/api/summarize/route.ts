@@ -44,6 +44,11 @@ export async function POST(req: NextRequest) {
     // プロンプトに文字数制限を明示的に追加
     const systemPrompt = `${prompt || "あなたはYouTube動画のエンディング作成の専門家です。"}\n\n以下の制約を必ず守ってください：
 
+# 言語設定
+- 必ず日本語で出力してください
+- 英語や他の言語は使用しないでください
+- ハッシュタグも日本語を使用してください
+
 # 実行指示
 {台本}に基づいて、エンディングタイトルをナレーションテキストで出力してください。
 
@@ -75,20 +80,26 @@ export async function POST(req: NextRequest) {
 - 指示の再確認は不要
 - 結論やまとめは不要
 - 自己評価は不要
-- チャンネル登録、高評価、コメントを必ず促す`;
+- チャンネル登録、高評価、コメントを必ず促す
+- 必ず日本語で出力してください`;
 
     let response = '';
 
     if (model === 'gemini-pro') {
       try {
         // Gemini APIを使用
-        const geminiModel = genAI.getGenerativeModel({ model: "gemini-pro" });
-        const result = await geminiModel.generateContent({
-          contents: [{ role: 'user', parts: [{ text: `${systemPrompt}\n\n${text}` }]}],
+        const geminiModel = genAI.getGenerativeModel({ 
+          model: "gemini-pro",
           generationConfig: {
             temperature: 0.7,
             maxOutputTokens: 1000,
           },
+        });
+        const result = await geminiModel.generateContent({
+          contents: [{ 
+            role: 'user', 
+            parts: [{ text: `必ず日本語で応答してください。\n\n${systemPrompt}\n\n${text}` }]
+          }],
         });
         const geminiResponse = await result.response;
         response = geminiResponse.text();
@@ -103,6 +114,7 @@ export async function POST(req: NextRequest) {
           model: model === 'claude-3-opus' ? 'claude-3-opus-20240229' : 'claude-3-sonnet-20240229',
           max_tokens: 1000,
           temperature: 0.7,
+          system: "必ず日本語で応答してください。英語や他の言語は使用しないでください。",
           messages: [
             {
               role: 'user',
@@ -124,6 +136,10 @@ export async function POST(req: NextRequest) {
       const completion = await openai.chat.completions.create({
         model,
         messages: [
+          {
+            role: "system",
+            content: "必ず日本語で応答してください。英語や他の言語は使用しないでください。"
+          },
           {
             role: "system",
             content: systemPrompt
