@@ -556,8 +556,8 @@ ${prompt}`;
                 <h3 className="text-sm font-medium text-gray-700 mb-2">
                   {activeTab === 'x' ? 'X用投稿文のプロンプト' : 'ブログ記事のプロンプト'}
                 </h3>
-                <input
-                  type="text"
+        <input
+          type="text"
                   value={promptName}
                   onChange={(e) => setPromptName(e.target.value)}
                   placeholder="プロンプト名"
@@ -648,7 +648,7 @@ ${prompt}`;
               className="w-full bg-gray-900 text-white py-3 rounded-lg hover:bg-gray-800 transition-colors"
             >
               クリップボードにコピー
-            </button>
+        </button>
           </section>
         )}
 
