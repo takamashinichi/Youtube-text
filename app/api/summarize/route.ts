@@ -80,33 +80,44 @@ export async function POST(req: NextRequest) {
     let response = '';
 
     if (model === 'gemini-pro') {
-      // Gemini APIを使用
-      const geminiModel = genAI.getGenerativeModel({ model: "gemini-pro" });
-      const result = await geminiModel.generateContent([
-        systemPrompt,
-        text
-      ]);
-      const geminiResponse = await result.response;
-      response = geminiResponse.text();
-    } else if (model.startsWith('claude-3')) {
-      // Claude APIを使用
-      const message = await anthropic.messages.create({
-        model: model === 'claude-3-opus' ? 'claude-3-opus-20240229' : 'claude-3-sonnet-20240229',
-        max_tokens: 1000,
-        temperature: 0.7,
-        system: systemPrompt,
-        messages: [
-          {
-            role: 'user',
-            content: text,
+      try {
+        // Gemini APIを使用
+        const geminiModel = genAI.getGenerativeModel({ model: "gemini-pro" });
+        const result = await geminiModel.generateContent({
+          contents: [{ role: 'user', parts: [{ text: `${systemPrompt}\n\n${text}` }]}],
+          generationConfig: {
+            temperature: 0.7,
+            maxOutputTokens: 1000,
           },
-        ],
-      });
-      const content = message.content[0];
-      if ('value' in content && typeof content.value === 'string') {
-        response = content.value;
-      } else {
-        throw new Error("予期しない応答形式です。");
+        });
+        const geminiResponse = await result.response;
+        response = geminiResponse.text();
+      } catch (error) {
+        console.error("Gemini APIエラー:", error);
+        throw new Error("Gemini APIでの生成に失敗しました。");
+      }
+    } else if (model.startsWith('claude-3')) {
+      try {
+        // Claude APIを使用
+        const message = await anthropic.messages.create({
+          model: model === 'claude-3-opus' ? 'claude-3-opus-20240229' : 'claude-3-sonnet-20240229',
+          max_tokens: 1000,
+          temperature: 0.7,
+          messages: [
+            {
+              role: 'user',
+              content: `${systemPrompt}\n\n${text}`,
+            },
+          ],
+        });
+        if (message.content[0].type === 'text') {
+          response = message.content[0].text;
+        } else {
+          throw new Error("予期しない応答形式です。");
+        }
+      } catch (error) {
+        console.error("Claude APIエラー:", error);
+        throw new Error("Claude APIでの生成に失敗しました。");
       }
     } else {
       // OpenAI APIを使用
