@@ -1,8 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from 'openai';
+import { GoogleGenerativeAI } from '@google/generative-ai';
+import Anthropic from '@anthropic-ai/sdk';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
+});
+
+const googleAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
+const anthropic = new Anthropic({
+  apiKey: process.env.CLAUDE_API_KEY || '',
 });
 
 // 利用可能なAIモデル
@@ -11,8 +18,10 @@ const ALLOWED_MODELS = [
   'gpt-4', 
   'gpt-4-turbo',
   'gemini-pro',
-  'claude-3-opus',
-  'claude-3-sonnet'
+  'claude-3-opus-20240229',
+  'claude-3-sonnet-20240229',
+  'claude-3-opus',  // フロントエンドから送信されるモデル名
+  'claude-3-sonnet'  // フロントエンドから送信されるモデル名
 ];
 
 export async function POST(req: NextRequest) {
@@ -101,23 +110,67 @@ A1: （簡潔な回答）
 ・（関連記事タイトル2）
 `;
 
-    const completion = await openai.chat.completions.create({
-      model,
-      messages: [
-        {
-          role: "system",
-          content: systemPrompt
-        },
-        {
-          role: "user",
-          content: `以下の動画内容からSEO最適化されたブログ記事を生成してください。特に検索意図を意識し、ユーザーが求める情報を網羅的に提供してください：\n\n${text}`
-        }
-      ],
-      max_tokens: 3000,
-      temperature: 0.7,
-    });
+    let blogContent = '';
 
-    const blogContent = completion.choices[0].message.content?.trim() || '';
+    // OpenAI APIの使用
+    if (model.startsWith('gpt')) {
+      const completion = await openai.chat.completions.create({
+        model,
+        messages: [
+          {
+            role: "system",
+            content: systemPrompt
+          },
+          {
+            role: "user",
+            content: `以下の動画内容からSEO最適化されたブログ記事を生成してください。特に検索意図を意識し、ユーザーが求める情報を網羅的に提供してください：\n\n${text}`
+          }
+        ],
+        max_tokens: 3000,
+        temperature: 0.7,
+      });
+
+      blogContent = completion.choices[0].message.content?.trim() || '';
+    }
+    // Gemini APIの使用
+    else if (model === 'gemini-pro') {
+      const geminiModel = googleAI.getGenerativeModel({ model: 'gemini-pro' });
+      
+      const geminiPrompt = `${systemPrompt}\n\n以下のYoutube動画の内容からSEO最適化されたブログ記事を生成してください：\n\n${text}`;
+      
+      const result = await geminiModel.generateContent(geminiPrompt);
+      blogContent = result.response.text();
+    }
+    // Claude APIの使用
+    else if (model.startsWith('claude')) {
+      // モデル名をマッピング
+      const claudeModelMap: Record<string, string> = {
+        'claude-3-opus': 'claude-3-opus-20240229',
+        'claude-3-sonnet': 'claude-3-sonnet-20240229'
+      };
+      
+      const actualModel = claudeModelMap[model] || model;
+      
+      const claudeResponse = await anthropic.messages.create({
+        model: actualModel,
+        max_tokens: 3000,
+        system: systemPrompt,
+        messages: [
+          {
+            role: "user", 
+            content: `以下のYoutube動画の内容からSEO最適化されたブログ記事を生成してください：\n\n${text}`
+          }
+        ],
+        temperature: 0.7,
+      });
+      
+      const content = claudeResponse.content[0];
+      if (content.type === 'text') {
+        blogContent = content.text.trim();
+      } else {
+        blogContent = '';
+      }
+    }
     
     if (!blogContent) {
       throw new Error("ブログ記事の生成に失敗しました。");
@@ -132,8 +185,19 @@ A1: （簡潔な回答）
 
   } catch (error) {
     console.error("ブログ記事生成エラー:", error);
+    let errorMessage = "ブログ記事の生成に失敗しました。";
+    
+    if (error instanceof Error) {
+      errorMessage = error.message;
+      console.error("エラーの詳細:", {
+        name: error.name,
+        message: error.message,
+        stack: error.stack
+      });
+    }
+
     return NextResponse.json(
-      { error: "ブログ記事の生成に失敗しました。" },
+      { error: errorMessage },
       { status: 500 }
     );
   }

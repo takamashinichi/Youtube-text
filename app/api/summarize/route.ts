@@ -1,14 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from 'openai';
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import Anthropic from '@anthropic-ai/sdk';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
-
+const googleAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 const anthropic = new Anthropic({
   apiKey: process.env.CLAUDE_API_KEY || '',
 });
@@ -19,8 +18,10 @@ const ALLOWED_MODELS = [
   'gpt-4', 
   'gpt-4-turbo',
   'gemini-pro',
-  'claude-3-opus',
-  'claude-3-sonnet'
+  'claude-3-opus-20240229',
+  'claude-3-sonnet-20240229',
+  'claude-3-opus',  // フロントエンドから送信されるモデル名
+  'claude-3-sonnet'  // フロントエンドから送信されるモデル名
 ];
 
 export async function POST(req: NextRequest) {
@@ -41,105 +42,29 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // プロンプトに文字数制限を明示的に追加
-    const systemPrompt = `${prompt || "あなたはYouTube動画のエンディング作成の専門家です。"}\n\n以下の制約を必ず守ってください：
+    const systemPrompt = `あなたはYouTube動画の内容をX（旧Twitter）用の投稿文に変換する専門家です。
+以下の制約を必ず守ってください：
 
-# 言語設定
-- 必ず日本語で出力してください
-- 英語や他の言語は使用しないでください
-- ハッシュタグも日本語を使用してください
+1. 必ず日本語で書く
+2. 本文は"---"の前に記述
+3. ハッシュタグは"---"の後に記述
+4. 本文は200文字以内
 
-# 実行指示
-{台本}に基づいて、エンディングタイトルをナレーションテキストで出力してください。
+例：
+すごく面白い動画でした！ためになる情報がたくさん詰まっています。ぜひチャンネル登録して、次回もお見逃しなく！
 
-# 必須要件
-1. マズローの欲求段階
-   - 1段目（生理的欲求）と2段目（安全欲求）を刺激
-   - 生存本能に訴えかける表現
-   - 安全・安心への欲求を喚起
+---
 
-2. CTR最適化要素
-   - 次回予告の魅力的な提示
-   - 具体的な日時や事実の言及
-   - 緊急性や重要性の強調
-   - 視聴者の感情に訴えかける表現
-
-3. 視聴者エンゲージメント
-   - チャンネル登録の促し
-   - 高評価ボタンの案内
-   - コメント欄での意見募集
-   - 次回予告や伏線
-
-# 文章構成
-- 全体で300文字程度を厳守
-- 印象的なまとめ
-- 次回への期待感醸成
-- 具体的なアクションの提示
-
-# 補足
-- 指示の再確認は不要
-- 結論やまとめは不要
-- 自己評価は不要
-- チャンネル登録、高評価、コメントを必ず促す
-- 必ず日本語で出力してください`;
+#YouTube #動画 #まとめ`;
 
     let response = '';
 
-    if (model === 'gemini-pro') {
-      try {
-        // Gemini APIを使用
-        const geminiModel = genAI.getGenerativeModel({ 
-          model: "gemini-pro",
-          generationConfig: {
-            temperature: 0.7,
-            maxOutputTokens: 1000,
-          },
-        });
-        const result = await geminiModel.generateContent({
-          contents: [{ 
-            role: 'user', 
-            parts: [{ text: `必ず日本語で応答してください。\n\n${systemPrompt}\n\n${text}` }]
-          }],
-        });
-        const geminiResponse = await result.response;
-        response = geminiResponse.text();
-      } catch (error) {
-        console.error("Gemini APIエラー:", error);
-        throw new Error("Gemini APIでの生成に失敗しました。");
-      }
-    } else if (model.startsWith('claude-3')) {
-      try {
-        // Claude APIを使用
-        const message = await anthropic.messages.create({
-          model: model === 'claude-3-opus' ? 'claude-3-opus-20240229' : 'claude-3-sonnet-20240229',
-          max_tokens: 1000,
-          temperature: 0.7,
-          system: "必ず日本語で応答してください。英語や他の言語は使用しないでください。",
-          messages: [
-            {
-              role: 'user',
-              content: `${systemPrompt}\n\n${text}`,
-            },
-          ],
-        });
-        if (message.content[0].type === 'text') {
-          response = message.content[0].text;
-        } else {
-          throw new Error("予期しない応答形式です。");
-        }
-      } catch (error) {
-        console.error("Claude APIエラー:", error);
-        throw new Error("Claude APIでの生成に失敗しました。");
-      }
-    } else {
-      // OpenAI APIを使用
+    // OpenAI APIの使用
+    if (model.startsWith('gpt')) {
+      console.log("OpenAI API リクエスト送信...");
       const completion = await openai.chat.completions.create({
         model,
         messages: [
-          {
-            role: "system",
-            content: "必ず日本語で応答してください。英語や他の言語は使用しないでください。"
-          },
           {
             role: "system",
             content: systemPrompt
@@ -149,18 +74,110 @@ export async function POST(req: NextRequest) {
             content: text
           }
         ],
-        max_tokens: 500,
+        max_tokens: 1000,
         temperature: 0.7,
       });
 
-      response = completion.choices[0].message.content?.trim() || '';
+      console.log("OpenAI API レスポンス受信:", completion);
+      response = completion.choices[0].message.content || '';
+      console.log("OpenAI API レスポンステキスト:", response);
+      
+      if (!response) {
+        throw new Error("OpenAI APIからの応答が空です。");
+      }
+    }
+    // Gemini APIの使用
+    else if (model === 'gemini-pro') {
+      console.log("Gemini API リクエスト送信...");
+      const geminiModel = googleAI.getGenerativeModel({ model: 'gemini-pro' });
+      
+      const geminiPrompt = `${systemPrompt}\n\n以下のYoutube動画の内容をX用投稿文に変換してください：\n\n${text}`;
+      
+      const result = await geminiModel.generateContent(geminiPrompt);
+      response = result.response.text();
+      console.log("Gemini API レスポンス:", response);
+      
+      if (!response) {
+        throw new Error("Gemini APIからの応答が空です。");
+      }
+    }
+    // Claude APIの使用
+    else if (model.startsWith('claude')) {
+      console.log("Claude API リクエスト送信...");
+      
+      // モデル名をマッピング
+      const claudeModelMap: Record<string, string> = {
+        'claude-3-opus': 'claude-3-opus-20240229',
+        'claude-3-sonnet': 'claude-3-sonnet-20240229'
+      };
+      
+      const actualModel = claudeModelMap[model] || model;
+      
+      const claudeResponse = await anthropic.messages.create({
+        model: actualModel,
+        max_tokens: 1000,
+        system: systemPrompt,
+        messages: [
+          {
+            role: "user", 
+            content: `以下のYoutube動画の内容をX用投稿文に変換してください。必ず日本語で出力し、本文と"---"のあとにハッシュタグを記載してください：\n\n${text}`
+          }
+        ],
+        temperature: 0.7,
+      });
+      
+      // content[0].textをcontentとして取得するように修正
+      const content = claudeResponse.content[0];
+      if (content.type === 'text') {
+        response = content.text;
+      } else {
+        response = '';
+      }
+      console.log("Claude API レスポンス:", response);
+      
+      if (!response) {
+        throw new Error("Claude APIからの応答が空です。");
+      }
+    }
+
+    // 要約本文とハッシュタグを分離
+    let summaryText = '';
+    let hashtagText = '#YouTube #動画 #まとめ';
+    
+    if (response.includes('---')) {
+      const parts = response.split('---').map(text => text.trim());
+      
+      // 先頭が空の場合（ハイフンから始まる場合）
+      if (parts[0] === '' && parts.length > 1) {
+        // "---" の後のテキストが本文とハッシュタグを含む
+        const afterHyphen = parts[1];
+        
+        // ハッシュタグを検出して分離
+        const hashtagMatch = afterHyphen.match(/(#\S+\s*)+$/);
+        if (hashtagMatch) {
+          hashtagText = hashtagMatch[0].trim();
+          summaryText = afterHyphen.substring(0, hashtagMatch.index).trim();
+        } else {
+          summaryText = afterHyphen;
+        }
+      } else {
+        // 通常のケース："---"の前が本文、後がハッシュタグ
+        summaryText = parts[0];
+        if (parts.length > 1) {
+          hashtagText = parts[1];
+        }
+      }
+    } else {
+      // "---" がない場合は全文を本文として扱う
+      summaryText = response.trim();
     }
     
-    // 要約本文とハッシュタグを分離
-    const [summaryText, hashtagText = ''] = response.split('---').map(text => text.trim());
+    console.log("分離後のテキスト:", { summaryText, hashtagText });
     
+    // summaryTextが空の場合はレスポンス全体を使用
     if (!summaryText) {
-      throw new Error("要約の生成に失敗しました。");
+      summaryText = response.replace(/^---\s*/, '').trim();
+      console.log("summaryTextが空のため、レスポンス全体を使用:", summaryText);
     }
 
     // 句点の重複を防ぐ
@@ -173,24 +190,34 @@ export async function POST(req: NextRequest) {
     // ハッシュタグを含めた全体の長さをチェック
     const totalLength = cleanedSummaryText.length + NEWLINE_LENGTH + hashtagText.length;
 
+    let finalSummary = '';
     if (totalLength > MAX_LENGTH) {
       // ハッシュタグ部分を確保した上で、要約本文を切り詰める
       const maxSummaryLength = MAX_LENGTH - NEWLINE_LENGTH - hashtagText.length - 3; // "..." の長さを考慮
       const truncatedSummary = cleanedSummaryText.slice(0, maxSummaryLength) + "...";
-      return NextResponse.json({ 
-        summary: `${truncatedSummary}\n\n${hashtagText}`
-      });
+      finalSummary = `${truncatedSummary}\n\n${hashtagText}`;
+    } else {
+      finalSummary = `${cleanedSummaryText}\n\n${hashtagText}`;
     }
 
-    // 文字数制限内の場合はそのまま返す
-    return NextResponse.json({ 
-      summary: `${cleanedSummaryText}\n\n${hashtagText}`
-    });
+    console.log("最終的な要約:", finalSummary);
+    return NextResponse.json({ summary: finalSummary });
 
   } catch (error) {
     console.error("要約エラー:", error);
+    let errorMessage = "テキストの要約に失敗しました。";
+    
+    if (error instanceof Error) {
+      errorMessage = error.message;
+      console.error("エラーの詳細:", {
+        name: error.name,
+        message: error.message,
+        stack: error.stack
+      });
+    }
+
     return NextResponse.json(
-      { error: "テキストの要約に失敗しました。" },
+      { error: errorMessage },
       { status: 500 }
     );
   }
