@@ -112,7 +112,7 @@ ${text}
     } else if (model.startsWith('claude')) {
       console.log('Sending translation request to Claude');
       const anthropic = new Anthropic({
-        apiKey: process.env.ANTHROPIC_API_KEY,
+        apiKey: process.env.CLAUDE_API_KEY,
       });
 
       const response = await anthropic.messages.create({
@@ -193,7 +193,7 @@ export async function GET(req: NextRequest) {
 
     // 字幕を取得
     const transcript = await YoutubeTranscript.fetchTranscript(videoId);
-
+    console.log(transcript);
     if (!transcript || transcript.length === 0) {
       return NextResponse.json(
         { error: "字幕が見つかりませんでした。" },
