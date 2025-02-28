@@ -190,7 +190,9 @@ export default function Home() {
         throw new Error('有効なYouTube URLを入力してください。');
       }
 
-      const response = await fetch(`/api/transcript?videoId=${videoId}`);
+      // 翻訳オプションを追加
+      const translateOption = true; // 常に翻訳を有効にする
+      const response = await fetch(`/api/transcript?videoId=${videoId}&translate=${translateOption}&model=${selectedModel}`);
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.error || '字幕の取得に失敗しました。');
