@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
     const systemPrompt = `あなたはYouTube動画の内容をX（旧Twitter）用の投稿文に変換する専門家です。
 以下の制約を必ず守ってください：
 
-1. 必ず日本語で書く
+1. 必ず日本語で出力してください。英語や他の言語は使用しないでください。
 2. 本文は"---"の前に記述
 3. ハッシュタグは"---"の後に記述
 4. 本文は200文字以内
@@ -129,7 +129,7 @@ export async function POST(req: NextRequest) {
         messages: [
           {
             role: "user", 
-            content: `以下のYoutube動画の内容をX用投稿文に変換してください。必ず日本語で出力し、本文と"---"のあとにハッシュタグを記載してください：\n\n${text}`
+            content: `以下のYoutube動画の内容をX用投稿文に変換してください。必ず日本語のみで出力し、絶対に英語や他の言語を使わないでください。本文と"---"のあとにハッシュタグを記載してください：\n\n${text}`
           }
         ],
         temperature: 0.7,
