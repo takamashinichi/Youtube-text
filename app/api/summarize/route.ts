@@ -89,16 +89,25 @@ export async function POST(req: NextRequest) {
     // Gemini APIの使用
     else if (model === 'gemini-pro') {
       console.log("Gemini API リクエスト送信...");
-      const geminiModel = googleAI.getGenerativeModel({ model: 'gemini-pro' });
+      console.log("Gemini API Key:", process.env.GEMINI_API_KEY);
       
-      const geminiPrompt = `${systemPrompt}\n\n以下のYoutube動画の内容をX用投稿文に変換してください：\n\n${text}`;
-      
-      const result = await geminiModel.generateContent(geminiPrompt);
-      response = result.response.text();
-      console.log("Gemini API レスポンス:", response);
-      
-      if (!response) {
-        throw new Error("Gemini APIからの応答が空です。");
+      try {
+        const geminiModel = googleAI.getGenerativeModel({ model: 'gemini-pro' });
+        
+        const geminiPrompt = `${systemPrompt}\n\n以下のYoutube動画の内容をX用投稿文に変換してください：\n\n${text}`;
+        console.log("Gemini Prompt:", geminiPrompt.substring(0, 100) + "...");
+        
+        const result = await geminiModel.generateContent(geminiPrompt);
+        response = result.response.text();
+        console.log("Gemini API レスポンス:", response);
+        
+        if (!response) {
+          throw new Error("Gemini APIからの応答が空です。");
+        }
+      } catch (error) {
+        const geminiError = error as Error;
+        console.error("Gemini API エラー詳細:", geminiError);
+        throw new Error(`Gemini API エラー: ${geminiError.message}`);
       }
     }
     // Claude APIの使用

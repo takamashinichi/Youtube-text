@@ -24,7 +24,7 @@ const DEFAULT_PROMPT = `あなたはYouTube動画の内容を魅力的なX投稿
 3. アクションアイテム
    - 視聴者が次にとるべき行動を1つ提案
    - 具体的で実行可能な内容
-   - 「〜してみましょう」など、親しみやすい表現
+   - "〜してみましょう"など、親しみやすい表現
 
 4. ハッシュタグ
    - 動画のテーマに関連する3-4個のタグ
@@ -36,7 +36,7 @@ const DEFAULT_PROMPT = `あなたはYouTube動画の内容を魅力的なX投稿
 - 一文は40文字以内を目安に
 - 専門用語は平易な言葉に言い換え
 - 感情を喚起する表現を適度に使用
-- 「です・ます」調で親しみやすく
+- "です・ます"調で親しみやすく
 
 # 出力フォーマット
 （本文）
@@ -69,6 +69,15 @@ interface TargetPersona {
   painPoints: string[];
 }
 
+// AIペルソナの型定義
+interface AIPersona {
+  character: string;
+  tone: string;
+  expertise: string;
+  style: string;
+  additionalInstructions: string;
+}
+
 // YouTube URLから動画IDを抽出する関数
 function extractVideoId(url: string): string | null {
   const patterns = [
@@ -96,7 +105,7 @@ export default function Home() {
   const [isPromptVisible, setIsPromptVisible] = useState(false);
   const [savedPrompts, setSavedPrompts] = useState<SavedPrompt[]>([]);
   const [promptName, setPromptName] = useState('');
-  const [selectedModel, setSelectedModel] = useState<typeof AI_MODELS[number]['id']>('gpt-3.5-turbo');
+  const [selectedModel, setSelectedModel] = useState<typeof AI_MODELS[number]['id']>('claude-3-sonnet');
   const [activeTab, setActiveTab] = useState<'x' | 'blog'>('x');
   const [targetPersona, setTargetPersona] = useState<TargetPersona>({
     ageRange: '25-34',
@@ -105,7 +114,15 @@ export default function Home() {
     interests: [],
     painPoints: [],
   });
+  const [aiPersona, setAIPersona] = useState<AIPersona>({
+    character: 'プロフェッショナル',
+    tone: 'フレンドリー',
+    expertise: 'テクノロジー',
+    style: '簡潔',
+    additionalInstructions: '',
+  });
   const [isPersonaVisible, setIsPersonaVisible] = useState(false);
+  const [isAIPersonaVisible, setIsAIPersonaVisible] = useState(false);
 
   // 保存されたプロンプトを読み込む
   useEffect(() => {
@@ -147,6 +164,14 @@ export default function Home() {
     setPrompt(content);
   };
 
+  // AIペルソナの入力を処理する関数
+  const handleAIPersonaChange = (field: keyof AIPersona, value: string) => {
+    setAIPersona(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
   const handleSubmit = async () => {
     // すべての状態を初期化
     const resetState = () => {
@@ -174,8 +199,15 @@ export default function Home() {
       const text = await response.text();
       setTranscriptText(text);
 
-      // ターゲットペルソナ情報をプロンプトに追加
-      const personaPrompt = `
+      // ターゲットペルソナとAIペルソナ情報をプロンプトに追加
+      const enhancedPrompt = `
+# AIペルソナ設定
+- キャラクター: ${aiPersona.character}
+- トーン: ${aiPersona.tone}
+- 専門分野: ${aiPersona.expertise}
+- 文体スタイル: ${aiPersona.style}
+- 追加指示: ${aiPersona.additionalInstructions}
+
 # ターゲット設定
 - 年齢層: ${targetPersona.ageRange}
 - 性別: ${targetPersona.gender}
@@ -194,7 +226,7 @@ ${prompt}`;
           },
           body: JSON.stringify({ 
             text, 
-            prompt: personaPrompt, 
+            prompt: enhancedPrompt, 
             model: selectedModel 
           }),
         });
@@ -341,30 +373,24 @@ ${prompt}`;
         {/* AIモデル選択セクション */}
         <section className="bg-white rounded-lg shadow p-6 mb-6">
           <h2 className="text-lg font-semibold mb-4">2. AIモデルを選択</h2>
-          <div className="grid gap-3">
-            {AI_MODELS.map((model) => (
-              <label
-                key={model.id}
-                className={`flex items-center p-4 rounded-lg border-2 cursor-pointer transition-all ${
-                  selectedModel === model.id
-                    ? 'border-blue-500 bg-blue-50'
-                    : 'border-gray-200 hover:border-blue-200'
-                }`}
-              >
-                <input
-                  type="radio"
-                  name="ai-model"
-                  value={model.id}
-                  checked={selectedModel === model.id}
-                  onChange={(e) => setSelectedModel(e.target.value as typeof selectedModel)}
-                  className="w-4 h-4 text-blue-500"
-                />
-                <div className="ml-3">
-                  <div className="font-medium text-gray-900">{model.name}</div>
-                  <div className="text-sm text-gray-500">{model.description}</div>
-                </div>
-              </label>
-            ))}
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              使用するAIモデル
+            </label>
+            <select
+              value={selectedModel}
+              onChange={(e) => setSelectedModel(e.target.value as typeof selectedModel)}
+              className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            >
+              {AI_MODELS.map((model) => (
+                <option key={model.id} value={model.id}>
+                  {model.name} - {model.description}
+                </option>
+              ))}
+            </select>
+            <p className="mt-2 text-sm text-gray-500">
+              選択したモデル: <span className="font-medium">{AI_MODELS.find(m => m.id === selectedModel)?.name}</span>
+            </p>
           </div>
         </section>
 
@@ -373,6 +399,12 @@ ${prompt}`;
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold">3. プロンプト設定</h2>
             <div className="space-x-4">
+              <button
+                onClick={() => setIsAIPersonaVisible(!isAIPersonaVisible)}
+                className="text-blue-500 hover:text-blue-700 text-sm font-medium"
+              >
+                {isAIPersonaVisible ? 'AIペルソナ設定を隠す ▼' : 'AIペルソナ設定を表示 ▶'}
+              </button>
               <button
                 onClick={() => setIsPersonaVisible(!isPersonaVisible)}
                 className="text-blue-500 hover:text-blue-700 text-sm font-medium"
@@ -387,6 +419,99 @@ ${prompt}`;
               </button>
             </div>
           </div>
+
+          {/* AIペルソナ設定 */}
+          {isAIPersonaVisible && (
+            <div className="mb-6 p-4 bg-blue-50 rounded-lg">
+              <h3 className="text-md font-medium text-gray-700 mb-4">AIペルソナ設定</h3>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    キャラクター
+                  </label>
+                  <select
+                    value={aiPersona.character}
+                    onChange={(e) => handleAIPersonaChange('character', e.target.value)}
+                    className="w-full p-2 border rounded-lg"
+                  >
+                    <option value="プロフェッショナル">プロフェッショナル</option>
+                    <option value="フレンドリー">フレンドリー</option>
+                    <option value="教師">教師</option>
+                    <option value="コーチ">コーチ</option>
+                    <option value="エンターテイナー">エンターテイナー</option>
+                    <option value="アナリスト">アナリスト</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    トーン
+                  </label>
+                  <select
+                    value={aiPersona.tone}
+                    onChange={(e) => handleAIPersonaChange('tone', e.target.value)}
+                    className="w-full p-2 border rounded-lg"
+                  >
+                    <option value="フレンドリー">フレンドリー</option>
+                    <option value="カジュアル">カジュアル</option>
+                    <option value="フォーマル">フォーマル</option>
+                    <option value="熱意のある">熱意のある</option>
+                    <option value="冷静">冷静</option>
+                    <option value="ユーモラス">ユーモラス</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    専門分野
+                  </label>
+                  <select
+                    value={aiPersona.expertise}
+                    onChange={(e) => handleAIPersonaChange('expertise', e.target.value)}
+                    className="w-full p-2 border rounded-lg"
+                  >
+                    <option value="テクノロジー">テクノロジー</option>
+                    <option value="ビジネス">ビジネス</option>
+                    <option value="教育">教育</option>
+                    <option value="エンターテイメント">エンターテイメント</option>
+                    <option value="健康・フィットネス">健康・フィットネス</option>
+                    <option value="ライフスタイル">ライフスタイル</option>
+                    <option value="科学">科学</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    文体スタイル
+                  </label>
+                  <select
+                    value={aiPersona.style}
+                    onChange={(e) => handleAIPersonaChange('style', e.target.value)}
+                    className="w-full p-2 border rounded-lg"
+                  >
+                    <option value="簡潔">簡潔</option>
+                    <option value="詳細">詳細</option>
+                    <option value="物語調">物語調</option>
+                    <option value="説明的">説明的</option>
+                    <option value="説得力のある">説得力のある</option>
+                    <option value="インパクトのある">インパクトのある</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    追加指示
+                  </label>
+                  <textarea
+                    value={aiPersona.additionalInstructions}
+                    onChange={(e) => handleAIPersonaChange('additionalInstructions', e.target.value)}
+                    placeholder="AIへの追加指示があれば入力してください"
+                    className="w-full p-2 border rounded-lg h-20"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* ターゲットペルソナ設定 */}
           {isPersonaVisible && (
