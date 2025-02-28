@@ -4,26 +4,6 @@ import OpenAI from 'openai';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import Anthropic from '@anthropic-ai/sdk';
 
-// OpenAIのAPIキーが設定されている場合のみインスタンスを作成
-let openai: OpenAI | null = null;
-try {
-  if (process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.trim() !== '') {
-    openai = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY,
-    });
-    console.log("OpenAI初期化成功");
-  } else {
-    console.log("OpenAI APIキーが設定されていないか空です");
-  }
-} catch (error) {
-  console.error("OpenAI初期化エラー:", error);
-}
-
-const googleAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
-const anthropic = new Anthropic({
-  apiKey: process.env.CLAUDE_API_KEY || '',
-});
-
 // 利用可能なAIモデル
 const ALLOWED_MODELS = [
   'gpt-3.5-turbo', 
@@ -71,6 +51,8 @@ async function translateToJapanese(text: string, model: string): Promise<string>
       console.log('Sending translation request to Gemini');
       
       try {
+        const googleAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
+
         // Gemini APIの設定を改善
         const genModel = googleAI.getGenerativeModel({ 
           model: 'gemini-pro',
@@ -146,7 +128,18 @@ ${text}
         temperature: 0.3,
       });
 
-      translatedText = response.content[0].text;
+      // Anthropic APIのレスポンス構造に対応
+      if (response.content && response.content.length > 0) {
+        const content = response.content[0];
+        // contentオブジェクトの型に応じて適切にテキストを取得
+        if ('text' in content) {
+          translatedText = content.text;
+        } else if (typeof content === 'object' && content !== null) {
+          // ToolUseBlockなど他の型の場合、利用可能なプロパティから取得を試みる
+          translatedText = JSON.stringify(content);
+        }
+      }
+      
       if (!translatedText) {
         throw new Error('Claude translation failed: Empty response');
       }

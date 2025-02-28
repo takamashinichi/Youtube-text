@@ -26,7 +26,7 @@ const ALLOWED_MODELS = [
 
 export async function POST(req: NextRequest) {
   try {
-    const { text, prompt, model = 'gpt-3.5-turbo' } = await req.json();
+    const { text, model = 'gpt-3.5-turbo' } = await req.json();
 
     if (!text) {
       return NextResponse.json(
