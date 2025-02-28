@@ -192,6 +192,12 @@ export default function Home() {
 
       // 翻訳オプションを追加
       const translateOption = true; // 常に翻訳を有効にする
+      
+      // Geminiモデルが選択されている場合の警告
+      if (selectedModel === 'gemini-pro') {
+        console.log('Geminiモデルが選択されています。APIの問題が発生した場合はClaudeモデルにフォールバックします。');
+      }
+      
       const response = await fetch(`/api/transcript?videoId=${videoId}&translate=${translateOption}&model=${selectedModel}`);
       if (!response.ok) {
         const errorData = await response.json();

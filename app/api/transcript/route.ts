@@ -37,104 +37,136 @@ const ALLOWED_MODELS = [
 ];
 
 // テキストを日本語に翻訳する関数
-async function translateToJapanese(text: string, model: string = 'claude-3-sonnet'): Promise<string> {
+async function translateToJapanese(text: string, model: string): Promise<string> {
+  console.log(`Translating with model: ${model}`);
+  let translatedText = '';
+
   try {
-    console.log(`${model}を使用して翻訳を開始...`);
-    
-    const systemPrompt = `あなたは高性能な翻訳AIです。与えられたテキストを自然で流暢な日本語に翻訳してください。
-以下の点に注意してください：
-1. 原文の意味を正確に保持すること
-2. 自然で読みやすい日本語にすること
-3. 専門用語は適切に翻訳すること
-4. 文化的な文脈を考慮すること
-5. 必ず日本語のみで出力すること`;
+    if (model === 'gpt-3.5-turbo' || model === 'gpt-4') {
+      console.log('Sending translation request to OpenAI');
+      const openai = new OpenAI({
+        apiKey: process.env.OPENAI_API_KEY,
+      });
 
-    let translatedText = '';
-
-    // OpenAI APIの使用
-    if (model.startsWith('gpt') && openai) {
-      console.log("OpenAI API 翻訳リクエスト送信...");
-      const completion = await openai.chat.completions.create({
-        model,
+      const response = await openai.chat.completions.create({
+        model: model,
         messages: [
           {
-            role: "system",
-            content: systemPrompt
+            role: 'system',
+            content: '以下のテキストを日本語に翻訳してください。翻訳は自然で流暢な日本語にし、原文の意味を正確に伝えてください。必ず日本語のみで出力してください。',
           },
           {
-            role: "user",
-            content: `以下のテキストを日本語に翻訳してください：\n\n${text}`
-          }
+            role: 'user',
+            content: text,
+          },
         ],
-        max_tokens: 4000,
         temperature: 0.3,
       });
 
-      translatedText = completion.choices[0].message.content || '';
-      
+      translatedText = response.choices[0].message.content || '';
       if (!translatedText) {
-        throw new Error("OpenAI APIからの翻訳応答が空です。");
+        throw new Error('OpenAI translation failed: Empty response');
       }
-    }
-    // Gemini APIの使用
-    else if (model === 'gemini-pro') {
-      console.log("Gemini API 翻訳リクエスト送信...");
+    } else if (model === 'gemini-pro') {
+      console.log('Sending translation request to Gemini');
       
-      const geminiModel = googleAI.getGenerativeModel({ model: 'gemini-pro' });
-      
-      const geminiPrompt = `${systemPrompt}\n\n以下のテキストを日本語に翻訳してください：\n\n${text}`;
-      
-      const result = await geminiModel.generateContent(geminiPrompt);
-      translatedText = result.response.text();
-      
-      if (!translatedText) {
-        throw new Error("Gemini APIからの翻訳応答が空です。");
+      try {
+        // Gemini APIの設定を改善
+        const genModel = googleAI.getGenerativeModel({ 
+          model: 'gemini-pro',
+          generationConfig: {
+            temperature: 0.3,
+            maxOutputTokens: 4000,
+          }
+        });
+
+        // 翻訳用のプロンプトを構築
+        const prompt = `以下のテキストを日本語に翻訳してください。翻訳は自然で流暢な日本語にし、原文の意味を正確に伝えてください。必ず日本語のみで出力してください。
+
+原文:
+${text}
+
+日本語訳:`;
+
+        console.log('Gemini prompt constructed, sending request...');
+        
+        const result = await genModel.generateContent(prompt);
+        console.log('Gemini response received');
+        
+        // レスポンスの検証
+        if (!result || !result.response) {
+          throw new Error('Gemini translation failed: Invalid or empty response');
+        }
+        
+        // Gemini APIのレスポンス処理を修正
+        let responseText = '';
+        if (result.response.text) {
+          // text()メソッドが存在する場合（関数として）
+          if (typeof result.response.text === 'function') {
+            responseText = result.response.text();
+          } 
+          // textがプロパティの場合
+          else if (typeof result.response.text === 'string') {
+            responseText = result.response.text;
+          }
+        } else if (result.response.candidates && result.response.candidates.length > 0) {
+          // candidatesからテキストを取得する代替方法
+          responseText = result.response.candidates[0].content?.parts?.[0]?.text || '';
+        }
+        
+        if (!responseText) {
+          throw new Error('Gemini translation failed: Could not extract text from response');
+        }
+        
+        translatedText = responseText;
+        console.log('Gemini translation successful');
+      } catch (geminiError) {
+        console.error('Gemini API error:', geminiError);
+        console.log('Falling back to Claude API for translation');
+        
+        // Gemini APIが失敗した場合、Claude APIにフォールバック
+        return translateToJapanese(text, 'claude-3-haiku-20240307');
       }
-    }
-    // Claude APIの使用
-    else if (model.startsWith('claude')) {
-      console.log("Claude API 翻訳リクエスト送信...");
-      
-      // モデル名をマッピング
-      const claudeModelMap: Record<string, string> = {
-        'claude-3-opus': 'claude-3-opus-20240229',
-        'claude-3-sonnet': 'claude-3-sonnet-20240229'
-      };
-      
-      const actualModel = claudeModelMap[model] || model;
-      
-      const claudeResponse = await anthropic.messages.create({
-        model: actualModel,
+    } else if (model.startsWith('claude')) {
+      console.log('Sending translation request to Claude');
+      const anthropic = new Anthropic({
+        apiKey: process.env.ANTHROPIC_API_KEY,
+      });
+
+      const response = await anthropic.messages.create({
+        model: model,
         max_tokens: 4000,
-        system: systemPrompt,
+        system: '以下のテキストを日本語に翻訳してください。翻訳は自然で流暢な日本語にし、原文の意味を正確に伝えてください。必ず日本語のみで出力してください。',
         messages: [
           {
-            role: "user", 
-            content: `以下のテキストを日本語に翻訳してください。必ず日本語のみで出力し、絶対に英語や他の言語を使わないでください：\n\n${text}`
-          }
+            role: 'user',
+            content: `以下のテキストを日本語に翻訳してください：\n\n${text}`,
+          },
         ],
         temperature: 0.3,
       });
-      
-      const content = claudeResponse.content[0];
-      if (content.type === 'text') {
-        translatedText = content.text;
-      } else {
-        translatedText = '';
-      }
-      
+
+      translatedText = response.content[0].text;
       if (!translatedText) {
-        throw new Error("Claude APIからの翻訳応答が空です。");
+        throw new Error('Claude translation failed: Empty response');
       }
     } else {
-      throw new Error("サポートされていないモデルが指定されました。");
+      throw new Error(`Unsupported model: ${model}`);
     }
 
-    console.log("翻訳完了");
     return translatedText;
   } catch (error) {
-    console.error("翻訳エラー:", error);
-    throw new Error(`翻訳に失敗しました: ${error instanceof Error ? error.message : '不明なエラー'}`);
+    console.error('Translation error:', error);
+    
+    // エラーが発生した場合、別のモデルにフォールバック
+    if (model !== 'claude-3-haiku-20240307') {
+      console.log('Falling back to Claude API for translation');
+      return translateToJapanese(text, 'claude-3-haiku-20240307');
+    }
+    
+    // エラーオブジェクトの型を適切に処理
+    const errorMessage = error instanceof Error ? error.message : '不明なエラー';
+    throw new Error(`Translation failed: ${errorMessage}`);
   }
 }
 
