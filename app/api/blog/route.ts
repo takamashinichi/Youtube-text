@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import OpenAI from 'openai';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import Anthropic from '@anthropic-ai/sdk';
+import { ALLOWED_MODELS, getActualModelName } from '../../utils/ai-models';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -11,18 +12,6 @@ const googleAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 const anthropic = new Anthropic({
   apiKey: process.env.CLAUDE_API_KEY || '',
 });
-
-// 利用可能なAIモデル
-const ALLOWED_MODELS = [
-  'gpt-3.5-turbo', 
-  'gpt-4', 
-  'gpt-4-turbo',
-  'gemini-pro',
-  'claude-3-opus-20240229',
-  'claude-3-sonnet-20240229',
-  'claude-3-opus',  // フロントエンドから送信されるモデル名
-  'claude-3-sonnet'  // フロントエンドから送信されるモデル名
-];
 
 export async function POST(req: NextRequest) {
   try {
@@ -133,8 +122,13 @@ A1: （簡潔な回答）
       blogContent = completion.choices[0].message.content?.trim() || '';
     }
     // Gemini APIの使用
-    else if (model === 'gemini-pro') {
-      const geminiModel = googleAI.getGenerativeModel({ model: 'gemini-pro' });
+    else if (model === 'gemini-1.5-pro') {
+      const actualModel = getActualModelName(model);
+      const geminiModel = googleAI.getGenerativeModel({ 
+        model: actualModel 
+      }, { 
+        apiVersion: 'v1beta' 
+      });
       
       const geminiPrompt = `${systemPrompt}\n\n以下のYoutube動画の内容からSEO最適化されたブログ記事を生成してください：\n\n${text}`;
       
@@ -143,13 +137,7 @@ A1: （簡潔な回答）
     }
     // Claude APIの使用
     else if (model.startsWith('claude')) {
-      // モデル名をマッピング
-      const claudeModelMap: Record<string, string> = {
-        'claude-3-opus': 'claude-3-opus-20240229',
-        'claude-3-sonnet': 'claude-3-sonnet-20240229'
-      };
-      
-      const actualModel = claudeModelMap[model] || model;
+      const actualModel = getActualModelName(model);
       
       const claudeResponse = await anthropic.messages.create({
         model: actualModel,

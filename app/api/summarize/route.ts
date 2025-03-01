@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import OpenAI from 'openai';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import Anthropic from '@anthropic-ai/sdk';
+import { v4 as uuidv4 } from 'uuid';
+import { ALLOWED_MODELS, getActualModelName } from '../../utils/ai-models';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -12,37 +14,114 @@ const anthropic = new Anthropic({
   apiKey: process.env.CLAUDE_API_KEY || '',
 });
 
-// 利用可能なAIモデル
-const ALLOWED_MODELS = [
-  'gpt-3.5-turbo', 
-  'gpt-4', 
-  'gpt-4-turbo',
-  'gemini-pro',
-  'claude-3-opus-20240229',
-  'claude-3-sonnet-20240229',
-  'claude-3-opus',  // フロントエンドから送信されるモデル名
-  'claude-3-sonnet'  // フロントエンドから送信されるモデル名
-];
+// ログレベルの定義
+type LogLevel = 'INFO' | 'WARN' | 'ERROR';
+
+// ロガー関数
+function logger(level: LogLevel, message: string, requestId?: string, metadata?: Record<string, unknown>) {
+  const timestamp = new Date().toISOString();
+  const requestIdStr = requestId ? `[${requestId}]` : '';
+  const metadataStr = metadata ? ` ${JSON.stringify(metadata)}` : '';
+  
+  const logMessage = `[${timestamp}] [${level}]${requestIdStr} ${message}${metadataStr}`;
+  
+  switch (level) {
+    case 'INFO':
+      console.log(logMessage);
+      break;
+    case 'WARN':
+      console.warn(logMessage);
+      break;
+    case 'ERROR':
+      console.error(logMessage);
+      break;
+  }
+}
+
+// レート制限のためのシンプルなメモリキャッシュ（本番環境ではRedisなどを使用）
+const rateLimitCache = new Map<string, { count: number, timestamp: number }>();
+const RATE_LIMIT = 10; // 1分間あたりのリクエスト数
+const RATE_LIMIT_WINDOW = 60 * 1000; // 1分（ミリ秒）
+
+// レート制限をチェックする関数
+function checkRateLimit(ip: string): boolean {
+  const now = Date.now();
+  const record = rateLimitCache.get(ip);
+  
+  if (!record) {
+    rateLimitCache.set(ip, { count: 1, timestamp: now });
+    return true;
+  }
+  
+  if (now - record.timestamp > RATE_LIMIT_WINDOW) {
+    // ウィンドウをリセット
+    rateLimitCache.set(ip, { count: 1, timestamp: now });
+    return true;
+  }
+  
+  if (record.count >= RATE_LIMIT) {
+    return false; // レート制限超過
+  }
+  
+  // カウントを増やす
+  record.count += 1;
+  rateLimitCache.set(ip, record);
+  return true;
+}
 
 export async function POST(req: NextRequest) {
+  // リクエストIDを生成（トレーサビリティのため）
+  const requestId = uuidv4();
+  const clientIp = req.headers.get('x-forwarded-for') || 'unknown';
+  
   try {
-    const { text, model = 'gpt-3.5-turbo' } = await req.json();
+    // リクエスト情報をログに記録
+    logger('INFO', '要約API リクエスト受信', requestId, { ip: clientIp });
+    
+    // レート制限の実装
+    if (!checkRateLimit(clientIp)) {
+      logger('WARN', 'レート制限超過', requestId, { ip: clientIp });
+      return NextResponse.json(
+        { error: "リクエスト数の上限に達しました。しばらく待ってから再試行してください。" },
+        { status: 429 }
+      );
+    }
+
+    const { text, model = 'gpt-3.5-turbo', prompt = '' } = await req.json();
+    logger('INFO', '要約リクエスト', requestId, { 
+      model, 
+      textLength: text?.length || 0,
+      hasCustomPrompt: !!prompt
+    });
 
     if (!text) {
+      logger('WARN', '要約エラー - テキストが指定されていません', requestId);
       return NextResponse.json(
         { error: "テキストが指定されていません。" },
         { status: 400 }
       );
     }
 
+    // 入力テキストの長さ制限
+    const MAX_INPUT_LENGTH = 50000; // 約50,000文字まで
+    if (text.length > MAX_INPUT_LENGTH) {
+      logger('WARN', '要約エラー - テキストが長すぎます', requestId, { length: text.length });
+      return NextResponse.json(
+        { error: "テキストが長すぎます。50,000文字以内にしてください。" },
+        { status: 400 }
+      );
+    }
+
     if (!ALLOWED_MODELS.includes(model)) {
+      logger('WARN', '要約エラー - 無効なモデル', requestId, { model });
       return NextResponse.json(
         { error: "無効なAIモデルが指定されました。" },
         { status: 400 }
       );
     }
 
-    const systemPrompt = `あなたはYouTube動画の内容をX（旧Twitter）用の投稿文に変換する専門家です。
+    // カスタムプロンプトがある場合はそれを使用し、なければデフォルトのプロンプトを使用
+    const systemPrompt = prompt || `あなたはYouTube動画の内容をX（旧Twitter）用の投稿文に変換する専門家です。
 以下の制約を必ず守ってください：
 
 1. 必ず日本語で出力してください。英語や他の言語は使用しないでください。
@@ -61,7 +140,9 @@ export async function POST(req: NextRequest) {
 
     // OpenAI APIの使用
     if (model.startsWith('gpt')) {
-      console.log("OpenAI API リクエスト送信...");
+      logger('INFO', 'OpenAI API リクエスト開始', requestId, { model });
+      
+      const startTime = Date.now();
       const completion = await openai.chat.completions.create({
         model,
         messages: [
@@ -77,51 +158,61 @@ export async function POST(req: NextRequest) {
         max_tokens: 1000,
         temperature: 0.7,
       });
+      const duration = Date.now() - startTime;
 
-      console.log("OpenAI API レスポンス受信:", completion);
       response = completion.choices[0].message.content || '';
-      console.log("OpenAI API レスポンステキスト:", response);
+      logger('INFO', 'OpenAI API レスポンス受信', requestId, { 
+        responseLength: response.length,
+        duration: `${duration}ms`
+      });
       
       if (!response) {
+        logger('ERROR', 'OpenAI API エラー - 空のレスポンス', requestId);
         throw new Error("OpenAI APIからの応答が空です。");
       }
     }
     // Gemini APIの使用
-    else if (model === 'gemini-pro') {
-      console.log("Gemini API リクエスト送信...");
-      console.log("Gemini API Key:", process.env.GEMINI_API_KEY);
-      
+    else if (model === 'gemini-1.5-pro') {
       try {
-        const geminiModel = googleAI.getGenerativeModel({ model: 'gemini-pro' });
+        logger('INFO', 'Gemini API リクエスト開始', requestId);
+        const startTime = Date.now();
         
+        const actualModel = getActualModelName(model);
+        const geminiModel = googleAI.getGenerativeModel({ 
+          model: actualModel 
+        }, { 
+          apiVersion: 'v1beta' 
+        });
         const geminiPrompt = `${systemPrompt}\n\n以下のYoutube動画の内容をX用投稿文に変換してください：\n\n${text}`;
-        console.log("Gemini Prompt:", geminiPrompt.substring(0, 100) + "...");
         
         const result = await geminiModel.generateContent(geminiPrompt);
+        const duration = Date.now() - startTime;
+        
         response = result.response.text();
-        console.log("Gemini API レスポンス:", response);
+        logger('INFO', 'Gemini API レスポンス受信', requestId, { 
+          responseLength: response.length,
+          duration: `${duration}ms`
+        });
         
         if (!response) {
+          logger('ERROR', 'Gemini API エラー - 空のレスポンス', requestId);
           throw new Error("Gemini APIからの応答が空です。");
         }
       } catch (error) {
         const geminiError = error as Error;
-        console.error("Gemini API エラー詳細:", geminiError);
+        logger('ERROR', 'Gemini API エラー', requestId, { 
+          error: geminiError.message,
+          stack: geminiError.stack
+        });
         throw new Error(`Gemini API エラー: ${geminiError.message}`);
       }
     }
     // Claude APIの使用
     else if (model.startsWith('claude')) {
-      console.log("Claude API リクエスト送信...");
+      const actualModel = getActualModelName(model);
+      logger('INFO', 'Claude API リクエスト開始', requestId, { model: actualModel });
       
-      // モデル名をマッピング
-      const claudeModelMap: Record<string, string> = {
-        'claude-3-opus': 'claude-3-opus-20240229',
-        'claude-3-sonnet': 'claude-3-sonnet-20240229'
-      };
-      
-      const actualModel = claudeModelMap[model] || model;
-      
+      const startTime = Date.now();
       const claudeResponse = await anthropic.messages.create({
         model: actualModel,
         max_tokens: 1000,
@@ -134,17 +225,25 @@ export async function POST(req: NextRequest) {
         ],
         temperature: 0.7,
       });
+      const duration = Date.now() - startTime;
       
       // content[0].textをcontentとして取得するように修正
       const content = claudeResponse.content[0];
       if (content.type === 'text') {
         response = content.text;
+        logger('INFO', 'Claude API レスポンス受信', requestId, { 
+          responseLength: response.length,
+          duration: `${duration}ms`
+        });
       } else {
+        logger('ERROR', 'Claude API エラー - テキスト以外のコンテンツタイプ', requestId, { 
+          contentType: content.type 
+        });
         response = '';
       }
-      console.log("Claude API レスポンス:", response);
       
       if (!response) {
+        logger('ERROR', 'Claude API エラー - 空のレスポンス', requestId);
         throw new Error("Claude APIからの応答が空です。");
       }
     }
@@ -181,12 +280,9 @@ export async function POST(req: NextRequest) {
       summaryText = response.trim();
     }
     
-    console.log("分離後のテキスト:", { summaryText, hashtagText });
-    
     // summaryTextが空の場合はレスポンス全体を使用
     if (!summaryText) {
       summaryText = response.replace(/^---\s*/, '').trim();
-      console.log("summaryTextが空のため、レスポンス全体を使用:", summaryText);
     }
 
     // 句点の重複を防ぐ
@@ -205,29 +301,52 @@ export async function POST(req: NextRequest) {
       const maxSummaryLength = MAX_LENGTH - NEWLINE_LENGTH - hashtagText.length - 3; // "..." の長さを考慮
       const truncatedSummary = cleanedSummaryText.slice(0, maxSummaryLength) + "...";
       finalSummary = `${truncatedSummary}\n\n${hashtagText}`;
+      
+      logger('INFO', '要約テキストを切り詰めました', requestId, {
+        originalLength: totalLength,
+        truncatedLength: finalSummary.length
+      });
     } else {
       finalSummary = `${cleanedSummaryText}\n\n${hashtagText}`;
     }
 
-    console.log("最終的な要約:", finalSummary);
-    return NextResponse.json({ summary: finalSummary });
+    // セキュリティヘッダーを追加
+    logger('INFO', '要約API 成功レスポンス', requestId, { 
+      summaryLength: finalSummary.length 
+    });
+    
+    return NextResponse.json(
+      { summary: finalSummary },
+      { 
+        status: 200,
+        headers: {
+          "Cache-Control": "no-store, max-age=0",
+          "X-Content-Type-Options": "nosniff",
+          "X-Request-ID": requestId
+        }
+      }
+    );
 
   } catch (error) {
-    console.error("要約エラー:", error);
+    logger('ERROR', '要約API エラー発生', requestId, { 
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined
+    });
+    
     let errorMessage = "テキストの要約に失敗しました。";
     
     if (error instanceof Error) {
       errorMessage = error.message;
-      console.error("エラーの詳細:", {
-        name: error.name,
-        message: error.message,
-        stack: error.stack
-      });
     }
 
     return NextResponse.json(
       { error: errorMessage },
-      { status: 500 }
+      { 
+        status: 500,
+        headers: {
+          "X-Request-ID": requestId
+        }
+      }
     );
   }
 } 

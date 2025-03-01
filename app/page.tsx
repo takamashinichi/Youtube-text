@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { AI_MODELS } from './utils/ai-models';
 
 // デフォルトプロンプト
 const DEFAULT_PROMPT = `あなたはYouTube動画の内容を魅力的なX投稿に変換する専門家です。
@@ -43,16 +44,6 @@ const DEFAULT_PROMPT = `あなたはYouTube動画の内容を魅力的なX投稿
 
 ---
 （ハッシュタグ）`;
-
-// 利用可能なAIモデル
-const AI_MODELS = [
-  { id: 'gpt-3.5-turbo', name: 'GPT-3.5 Turbo', description: '高速で経済的' },
-  { id: 'gpt-4', name: 'GPT-4', description: '高精度で詳細な分析が可能' },
-  { id: 'gpt-4-turbo', name: 'GPT-4 Turbo', description: '最新のGPT-4モデル' },
-  { id: 'gemini-pro', name: 'Gemini Pro', description: 'Googleの最新AI、高速で正確' },
-  { id: 'claude-3-opus', name: 'Claude-3 Opus', description: '最高精度のAI、複雑な分析が得意' },
-  { id: 'claude-3-sonnet', name: 'Claude-3 Sonnet', description: '高速で経済的なClaude' },
-] as const;
 
 // プロンプトの型定義
 interface SavedPrompt {
@@ -105,7 +96,7 @@ export default function Home() {
   const [isPromptVisible, setIsPromptVisible] = useState(false);
   const [savedPrompts, setSavedPrompts] = useState<SavedPrompt[]>([]);
   const [promptName, setPromptName] = useState('');
-  const [selectedModel, setSelectedModel] = useState<typeof AI_MODELS[number]['id']>('claude-3-sonnet');
+  const [selectedModel, setSelectedModel] = useState<typeof AI_MODELS[number]['id']>('claude-3-opus');
   const [activeTab, setActiveTab] = useState<'x' | 'blog'>('x');
   const [targetPersona, setTargetPersona] = useState<TargetPersona>({
     ageRange: '25-34',
@@ -189,23 +180,36 @@ export default function Home() {
       if (!videoId) {
         throw new Error('有効なYouTube URLを入力してください。');
       }
-
-      // 翻訳オプションを追加
-      const translateOption = true; // 常に翻訳を有効にする
       
-      // Geminiモデルが選択されている場合の警告
-      if (selectedModel === 'gemini-pro') {
-        console.log('Geminiモデルが選択されています。APIの問題が発生した場合はClaudeモデルにフォールバックします。');
-      }
+      const apiUrl = `/api/transcript?videoId=${videoId}`;
       
-      const response = await fetch(`/api/transcript?videoId=${videoId}&translate=${translateOption}&model=${selectedModel}`);
+      const response = await fetch(apiUrl);
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.error || '字幕の取得に失敗しました。');
       }
 
+      // 字幕テキストを取得
       const text = await response.text();
-      setTranscriptText(text);
+      
+      // 翻訳APIを呼び出す
+      const translateResponse = await fetch('/api/translate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ 
+          text, 
+          model: selectedModel 
+        }),
+      });
+
+      if (!translateResponse.ok) {
+        throw new Error('字幕の翻訳に失敗しました。');
+      }
+
+      const { translatedText } = await translateResponse.json();
+      setTranscriptText(translatedText);
 
       // ターゲットペルソナとAIペルソナ情報をプロンプトに追加
       const enhancedPrompt = `
@@ -233,14 +237,14 @@ ${prompt}`;
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({ 
-            text, 
+            text: translatedText, 
             prompt: enhancedPrompt, 
             model: selectedModel 
           }),
         });
 
         if (!summaryResponse.ok) {
-          throw new Error('要約の生成に失敗しました。');
+          throw new Error(`要約の生成に失敗しました。ステータス: ${summaryResponse.status}`);
         }
 
         const { summary } = await summaryResponse.json();
@@ -251,7 +255,7 @@ ${prompt}`;
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ text, prompt, model: selectedModel }),
+          body: JSON.stringify({ text: translatedText, prompt, model: selectedModel }),
         });
 
         if (!blogResponse.ok) {
@@ -415,6 +419,15 @@ ${prompt}`;
                     埋め込み: youtube.com/embed/xxxx
                   </li>
                 </ul>
+                <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
+                  <div className="flex items-center">
+                    <svg className="w-5 h-5 text-green-500 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                    </svg>
+                    <span className="font-semibold">字幕取得：</span>
+                  </div>
+                  <p className="mt-1 ml-7">動画の元の言語の字幕を自動的に取得し、日本語に翻訳します。</p>
+                </div>
               </div>
             </div>
           </div>
@@ -907,7 +920,7 @@ ${prompt}`;
                   className="flex-1 btn btn-secondary flex items-center justify-center"
                 >
                   <svg className="h-5 w-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M12.316 3.051a1 1 0 01.633 1.265l-4 12a1 1 0 11-1.898-.632l4-12a1 1 0 011.265-.633zM5.707 6.293a1 1 0 010 1.414L3.414 10l2.293 2.293a1 1 0 11-1.414 1.414l-3-3a1 1 0 010-1.414l3-3a1 1 0 011.414 0zm8.586 0a1 1 0 011.414 0l3 3a1 1 0 010 1.414l-3 3a1 1 0 11-1.414-1.414L16.586 10l-2.293-2.293a1 1 0 010-1.414z" clipRule="evenodd"></path>
+                    <path fillRule="evenodd" d="M12.316 3.051a1 1 0 01.633 1.265l-4 12a1 1 0 11-1.898-.632l4-12a1 1 0 011.265-.633zM5.707 6.293a1 1 0 010 1.414L3.414 10l2.293 2.293a1 1 0 11-1.414 1.414L10 11.414l1.293 1.293a1 1 0 011.414-1.414L11.414 10l1.293-1.293a1 1 0 010-1.414l-3-3a1 1 0 010-1.414l3-3a1 1 0 011.414 0zm8.586 0a1 1 0 011.414 0l3 3a1 1 0 010 1.414l-3 3a1 1 0 11-1.414-1.414L16.586 10l-2.293-2.293a1 1 0 010-1.414z" clipRule="evenodd"></path>
                   </svg>
                   HTMLをコピー
                 </button>
@@ -917,10 +930,17 @@ ${prompt}`;
         )}
 
         {transcriptText && (
-          <section className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-lg font-semibold mb-4">元の字幕</h2>
-            <div className="bg-gray-50 rounded-lg p-4">
-              <p className="whitespace-pre-wrap text-sm text-gray-600">{transcriptText}</p>
+          <section className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-8">
+            <h2 className="text-xl font-bold mb-4 text-gray-900 dark:text-white flex items-center">
+              <span className="text-gray-500 mr-2">📄</span>
+              元の字幕
+            </h2>
+            <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+              <div className="whitespace-pre-line text-gray-700 dark:text-gray-300 leading-relaxed">
+                {transcriptText.split('\n').map((line, index) => (
+                  <p key={index} className="mb-2">{line}</p>
+                ))}
+              </div>
             </div>
           </section>
         )}
